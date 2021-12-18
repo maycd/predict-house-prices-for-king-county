@@ -1,0 +1,875 @@
+---
+title: "p1 RF"
+author: "maycd"
+
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: "3"
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: lumen
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+---
+
+<style>
+#TOC {
+  color: #708090;
+  font-family: Calibri;
+  font-size: 16px;
+  border-color: #708090;
+}
+#header {
+  color: #F08080;
+  font-family: Calibri;
+  font-size: 20px;
+  background-color: #F5F5F5;
+  opacity: 0.6;
+}
+body {
+  color: #708090;
+  font-family: Calibri;
+  background-color: #F5F5F5;
+}
+</style>
+
+```{r setup, include=FALSE}
+rm(list=ls())
+
+knitr::opts_chunk$set(echo = TRUE, fig.align = 'center', fig.width = 9, fig.height = 6)
+
+if(!require("pacman")){install.packages("pacman")}
+pacman::p_load(BradleyTerry2, dplyr, ggplot2, caret, gbm, xgboost, recipes, randomForest, ranger, vip, pdp, h2o, tictoc)
+
+setwd("D:/7027 ML/HW2_7027")
+```
+
+```{r}
+house <- read.csv("HW2_house_dataset.csv", stringsAsFactors = TRUE)
+```
+
+# Stratified sampling
+```{r}
+set.seed(123)
+split_strat <- rsample::initial_split(house, prop = 0.8, strata = 'price')
+house_train <- rsample::training(split_strat)
+house_test <- rsample::testing(split_strat)
+```
+
+```{r}
+write.csv(house_train, file = "house_train.csv")
+write.csv(house_test, file = "house_test.csv")
+rm(list = ls())
+```
+
+```{r}
+house_train <- read.csv("house_train.csv", stringsAsFactors = TRUE)
+dim(house_train)  # dataset: house_train, response: price
+```
+
+```{r}
+# number of features
+n_features <- length(setdiff(names(house_train), "price"))
+```
+
+# RF
+```{r}
+# train a default random forest model
+house_rf1 <- ranger(
+  price ~ ., 
+  data = house_train,
+  mtry = floor(n_features / 3),
+  respect.unordered.factors = "order",
+  seed = 123
+)
+
+# get OOB RMSE
+(default_rmse <- sqrt(house_rf1$prediction.error))
+```
+
+```{r}
+house_rf1
+```
+
+```{r}
+# create hyperparameter grid
+hyper_grid <- expand.grid(
+  mtry = floor(n_features * c(.25, .33, .35, .4)),
+  min.node.size = c(1, 3, 5, 10),
+  replace = c(TRUE, FALSE),
+  sample.fraction = c(.5, .63, .8),
+  rmse = NA
+)
+
+tic()
+# execute full cartesian grid search
+for(i in seq_len(nrow(hyper_grid))) {
+  # fit model for ith hyperparameter combination
+  fit <- ranger(
+    formula = price ~ .,
+    data = house_train,
+    num.trees = n_features * 10,
+    mtry = hyper_grid$mtry[i],
+    min.node.size = hyper_grid$min.node.size[i],
+    replace = hyper_grid$replace[i],
+    sample.fraction = hyper_grid$sample.fraction[i],
+    verbose = FALSE,
+    seed = 123,
+    respect.unordered.factors = 'order',
+    )
+  #export OOB error
+  hyper_grid$rmse[i] <- sqrt(fit$prediction.error)
+}
+toc()
+
+# assess top 10 models
+hyper_grid %>%
+  arrange(rmse) %>%
+  mutate(perc_gain = (default_rmse - rmse) / default_rmse * 100) %>%
+  head(10)
+```
+
+```{r}
+best <- which.min(hyper_grid$rmse)
+house_rf <- ranger(
+    formula = price ~ .,
+    data = house_train,
+    num.trees = n_features * 10,
+    mtry = hyper_grid$mtry[best],
+    importance = "impurity",  # importance
+    min.node.size = hyper_grid$min.node.size[best],
+    replace = hyper_grid$replace[best],
+    sample.fraction = hyper_grid$sample.fraction[best],
+    verbose = FALSE,
+    seed = 123,
+    respect.unordered.factors = 'order'
+  )
+house_rf
+# get OOB RMSE
+(house_rf_rmse <- sqrt(house_rf$prediction.error))
+```
+
+```{r}
+save(house_rf, file = "house_rf.rda")
+```
+
+---------------------------------------------------------------------------
+
+---
+title: "p2 GBM"
+author: "maycd"
+
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: "3"
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: lumen
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+---
+
+<style>
+#TOC {
+  color: #708090;
+  font-family: Calibri;
+  font-size: 16px;
+  border-color: #708090;
+}
+#header {
+  color: #F08080;
+  font-family: Calibri;
+  font-size: 20px;
+  background-color: #F5F5F5;
+  opacity: 0.6;
+}
+body {
+  color: #708090;
+  font-family: Calibri;
+  background-color: #F5F5F5;
+}
+</style>
+
+```{r setup, include=FALSE}
+rm(list=ls())
+
+knitr::opts_chunk$set(echo = TRUE, fig.align = 'center', fig.width = 9, fig.height = 6)
+
+if(!require("pacman")){install.packages("pacman")}
+pacman::p_load(BradleyTerry2, dplyr, ggplot2, caret, gbm, xgboost, recipes, randomForest, ranger, vip, pdp, h2o, tictoc)
+
+setwd("D:/7027 ML/HW2_7027")
+```
+
+```{r}
+house_train <- read.csv("house_train.csv", stringsAsFactors = TRUE)
+dim(house_train)  # dataset: house_train, response: price
+```
+
+```{r}
+# number of features
+n_features <- length(setdiff(names(house_train), "price"))
+```
+
+# GBM
+```{r}
+tic()
+# run a basic GBM model
+set.seed(123)
+house_gbm1 <- gbm(
+  formula = price ~ .,
+  data = house_train,
+  distribution = "gaussian",  # SSE loss function
+  n.trees = 4000,  # start with sufficiently large n.trees
+  shrinkage = 0.1,
+  interaction.depth = 3,
+  n.minobsinnode = 10,
+  cv.folds = 10
+)
+# find index for number trees with minimum CV error
+best <- which.min(house_gbm1$cv.error)
+
+# get MSE and compute RMSE
+sqrt(house_gbm1$cv.error[best])
+
+toc()
+```
+
+```{r}
+house_gbm1
+```
+
+```{r}
+# plot error curve
+gbm.perf(house_gbm1, method = "cv")
+```
+
+```{r}
+tic()
+# create grid search
+hyper_grid <- expand.grid(
+  learning_rate = c(0.1, 0.05, 0.01),
+  rmse = NA,
+  trees = NA,
+  time = NA
+)
+# execute grid search
+for(i in seq_len(nrow(hyper_grid))) {
+
+  # fit gbm
+  set.seed(123)
+  train_time <- system.time({
+    m <- gbm(
+      formula = price ~ .,
+      data = house_train,
+      distribution = "gaussian",
+      n.trees = 4000, 
+      shrinkage = hyper_grid$learning_rate[i], 
+      interaction.depth = 3, 
+      n.minobsinnode = 10,
+      cv.folds = 10 
+   )
+  })
+  
+  # add SSE, trees, and training time to results
+  hyper_grid$rmse[i]  <- sqrt(min(m$cv.error))
+  hyper_grid$trees[i] <- which.min(m$cv.error)
+  hyper_grid$time[i]  <- train_time[["elapsed"]]
+
+}
+
+# results
+arrange(hyper_grid, rmse)
+best <- which.min(hyper_grid$rmse)
+toc()
+```
+
+
+```{r}
+tic()
+# search grid
+hyper_grid <- expand.grid(
+  n.trees = 2500,  # reduce to near optimal n.trees
+  shrinkage = hyper_grid$learning_rate[best],
+  interaction.depth = c(3, 5, 7),
+  n.minobsinnode = c(5, 10, 15)
+)
+
+# create model fit function
+model_fit <- function(n.trees, shrinkage, interaction.depth, n.minobsinnode) {
+  set.seed(123)
+  m <- gbm(
+    formula = price ~ .,
+    data = house_train,
+    distribution = "gaussian",
+    n.trees = n.trees,
+    shrinkage = shrinkage,
+    interaction.depth = interaction.depth,
+    n.minobsinnode = n.minobsinnode,
+    cv.folds = 10
+  )
+  # compute RMSE
+  sqrt(min(m$cv.error))
+}
+
+# perform search grid with functional programming
+hyper_grid$rmse <- purrr::pmap_dbl(
+  hyper_grid,
+  ~ model_fit(
+    n.trees = ..1,
+    shrinkage = ..2,
+    interaction.depth = ..3,
+    n.minobsinnode = ..4
+    )
+)
+
+# results
+arrange(hyper_grid, rmse)
+best <- which.min(hyper_grid$rmse)
+toc()
+```
+
+```{r}
+set.seed(123)
+house_gbm <- gbm(
+  formula = price ~ .,
+  data = house_train,
+  distribution = "gaussian",  # SSE loss function
+  n.trees = hyper_grid$n.trees[best],
+  shrinkage = hyper_grid$shrinkage[best],
+  interaction.depth = hyper_grid$interaction.depth[best],
+  n.minobsinnode = hyper_grid$n.minobsinnode[best],
+  cv.folds = 10
+)
+house_gbm
+
+# find index for number trees with minimum CV error
+best <- which.min(house_gbm$cv.error)
+
+# get MSE and compute RMSE
+(house_gbm_rmse <- sqrt(house_gbm$cv.error[best]))
+```
+
+```{r}
+save(house_gbm, file = "house_gbm.rda")
+```
+
+--------------------------------------------------------------------------
+
+---
+title: "p3 XGB"
+author: "maycd"
+
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: "3"
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: lumen
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+---
+
+<style>
+#TOC {
+  color: #708090;
+  font-family: Calibri;
+  font-size: 16px;
+  border-color: #708090;
+}
+#header {
+  color: #F08080;
+  font-family: Calibri;
+  font-size: 20px;
+  background-color: #F5F5F5;
+  opacity: 0.6;
+}
+body {
+  color: #708090;
+  font-family: Calibri;
+  background-color: #F5F5F5;
+}
+</style>
+
+```{r setup, include=FALSE}
+rm(list=ls())
+
+knitr::opts_chunk$set(echo = TRUE, fig.align = 'center', fig.width = 9, fig.height = 6)
+
+if(!require("pacman")){install.packages("pacman")}
+pacman::p_load(BradleyTerry2, dplyr, ggplot2, caret, gbm, xgboost, recipes, randomForest, ranger, vip, pdp, h2o, tictoc)
+
+setwd("D:/7027 ML/HW2_7027")
+```
+
+```{r}
+house_train <- read.csv("house_train.csv", stringsAsFactors = TRUE)
+dim(house_train)  # dataset: house_train, response: price
+```
+
+```{r}
+# number of features
+n_features <- length(setdiff(names(house_train), "price"))
+```
+
+# XGBoost
+```{r}
+xgb_prep <- recipe(price ~ ., data = house_train) %>%
+  step_integer(all_nominal()) %>%
+  prep(training = house_train, retain = TRUE) %>%
+  juice()
+
+X <- as.matrix(xgb_prep[setdiff(names(xgb_prep), "price")])
+Y <- xgb_prep$price
+```
+
+```{r}
+# before tuning
+tic()
+set.seed(123)
+house_xgb1 <- xgb.cv(
+  data = X,
+  label = Y,
+  nrounds = 2500,
+  objective = "reg:squarederror",
+  early_stopping_rounds = 5, 
+  nfold = 10,
+  params = list(
+    eta = 0.01,
+    max_depth = 7,
+    min_child_weight = 2,
+    subsample = 0.8,
+    colsample_bytree = 0.9),
+  verbose = 0
+)  
+
+# minimum test CV RMSE
+min(house_xgb1$evaluation_log$test_rmse_mean)
+toc()
+```
+
+```{r}
+tic()
+# hyperparameter grid
+hyper_grid <- expand.grid(
+  eta = 0.01,
+  max_depth = 7, 
+  min_child_weight = 2,
+  subsample = 0.8, 
+  colsample_bytree = 0.9,
+  gamma = c(0, 1, 10),
+  lambda = c(0, 1e-3, 1e-2, 0.1, 1, 100),
+  alpha = c(0, 1e-2, 0.05, 0.1, 1, 100),
+  rmse = 0,          # a place to dump RMSE results
+  trees = 0          # a place to dump required number of trees
+)
+
+# grid search
+for(i in seq_len(nrow(hyper_grid))) {
+  set.seed(123)
+  m <- xgb.cv(
+    data = X,
+    label = Y,
+    nrounds = 3000,
+    objective = "reg:squarederror",
+    early_stopping_rounds = 10, 
+    nfold = 10,
+    verbose = 0,
+    params = list( 
+      eta = hyper_grid$eta[i], 
+      max_depth = hyper_grid$max_depth[i],
+      min_child_weight = hyper_grid$min_child_weight[i],
+      subsample = hyper_grid$subsample[i],
+      colsample_bytree = hyper_grid$colsample_bytree[i],
+      gamma = hyper_grid$gamma[i], 
+      lambda = hyper_grid$lambda[i], 
+      alpha = hyper_grid$alpha[i]
+    ) 
+  )
+  hyper_grid$rmse[i] <- min(m$evaluation_log$test_rmse_mean)
+  hyper_grid$trees[i] <- m$best_iteration
+}
+
+# results
+hyper_grid %>%
+  filter(rmse > 0) %>%
+  arrange(rmse) %>%
+  glimpse()
+best <- which.min(hyper_grid$rmse) # rmse does not decrease
+toc()
+```
+
+```{r}
+# after tuning
+tic()
+set.seed(123)
+house_xgb <- xgb.cv(
+  data = X,
+  label = Y,
+  nrounds = 2500,
+  objective = "reg:squarederror",
+  early_stopping_rounds = 5, 
+  nfold = 10,
+  verbose = 0,
+  params = list( 
+    eta = 0.01, 
+    max_depth = 7,
+    min_child_weight = 2,
+    subsample = 0.8,
+    colsample_bytree = 0.9,
+    gamma = hyper_grid$gamma[best], 
+    lambda = hyper_grid$lambda[best], 
+    alpha = hyper_grid$alpha[best]
+  ) 
+)  
+
+# minimum test CV RMSE
+min(house_xgb$evaluation_log$test_rmse_mean)
+toc()
+```
+
+```{r}
+save(house_xgb, file = "house_xgb.rda")
+```
+
+```{r}
+# final model
+tic()
+set.seed(123)
+house_xgb_final <- xgboost(
+  data = X,
+  label = Y,
+  nrounds = 2500,
+  objective = "reg:squarederror",
+  early_stopping_rounds = 5,
+  verbose = 0,
+  params = list( 
+    eta = 0.01, 
+    max_depth = 7,
+    min_child_weight = 2,
+    subsample = 0.8,
+    colsample_bytree = 0.9,
+    gamma = hyper_grid$gamma[best], 
+    lambda = hyper_grid$lambda[best], 
+    alpha = hyper_grid$alpha[best]
+  ) 
+)  
+house_xgb_final
+toc()
+```
+
+```{r}
+save(house_xgb_final, file = "house_xgb_final.rda")
+```
+
+--------------------------------------------------------------------------
+
+---
+title: "p4 Comparison"
+author: "maycd"
+
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: "3"
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: lumen
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+---
+
+<style>
+#TOC {
+  color: #708090;
+  font-family: Calibri;
+  font-size: 16px;
+  border-color: #708090;
+}
+#header {
+  color: #F08080;
+  font-family: Calibri;
+  font-size: 20px;
+  background-color: #F5F5F5;
+  opacity: 0.6;
+}
+body {
+  color: #708090;
+  font-family: Calibri;
+  background-color: #F5F5F5;
+}
+</style>
+
+```{r setup, include=FALSE}
+rm(list=ls())
+
+knitr::opts_chunk$set(echo = TRUE, fig.align = 'center', fig.width = 9, fig.height = 6)
+
+if(!require("pacman")){install.packages("pacman")}
+pacman::p_load(BradleyTerry2, dplyr, ggplot2, caret, gbm, xgboost, recipes, randomForest, ranger, vip, pdp, tictoc)
+
+#setwd("D:/7027 ML/HW2_7027")
+```
+
+As the last part of HW2, this document "p4 Comparison" will chiefly discuss results of the models. (All objects loaded into this document are outcomes from the previous three documents executed in sequence "p1 RF", "p2 GBM", and "p3 Xgboost". Because we did not specify `row.names=FALSE` when writing data into csv in the document "p1 RF", train and test data both have a duplicate row containing rownames. However, the issue does not affect our tree-based models.)
+
+```{r}
+# KingCountyHouses package
+# Description: 
+# housing data in Washington State from 2014-05-02 to 2015-05-27. There are 21,613 data points with 19 columns
+# Source:
+# https://geodacenter.github.io/data-and-lab//KingCounty-HouseSales2015/
+```
+
+```{r}
+house_train <- read.csv("house_train.csv", stringsAsFactors = TRUE)
+dim(house_train)  # dataset: house_train, response: price
+```
+
+```{r}
+# number of features
+n_features <- length(setdiff(names(house_train), "price"))
+```
+
+# RF
+## Hyperparameters
+In document "p1 RF", we have performed tasks
+(1) set seed as 123, 
+(2) performed stratified sampling, and 
+(3) performed random forest on the training data.
+
+The best tuning hyperparameters are:
+  mtry = 7  (a random subset of 7 variables for split)
+  min.node.size = 5  (at least 5 observations in a leaf)
+  replace = FALSE  (sampling without replacement)
+  sample.fraction = 0.63  (0.63 of observations to sample)
+  
+We find them by Cartesian full grid search: 
+we start with a RF model with default hyperparameters, create a hyperparameter tuning grid containing different values of mtry, min.node.size, replace, and sample.fraction, execute Cartesian full grid search in a for loop of one model for each combination of hyperparameters in the grid, measure their RMSE. The best tuning hyperparameters are in the one with the least cross-validated RMSE on the training data, which is 0.07912 here.
+
+```{r}
+load(file = "house_rf.rda")
+```
+
+```{r}
+house_rf
+```
+
+After tuning, model RMSE decreases by
+```{r}
+paste(round((1 - 0.07912199/0.0792796) * 100, 4), "%", sep = "")
+```
+
+## Variable importance
+`lattitude`, `sqft_living`, `nn_sqft_living`, and `sqft_above` are the four most important predictors.
+```{r}
+vi_scores <- vi(house_rf)
+head(vi_scores, 4)
+```
+
+```{r}
+vip(house_rf, num_features = 4, scale = TRUE)
+```
+
+## PDP plots
+```{r}
+tic()
+p1 <- partial(house_rf, pred.var = vi_scores[[1, 1]]) %>% autoplot()
+p2 <- partial(house_rf, pred.var = vi_scores[[2, 1]]) %>% autoplot()
+p3 <- partial(house_rf, pred.var = vi_scores[[3, 1]]) %>% autoplot()
+p4 <- partial(house_rf, pred.var = vi_scores[[4, 1]]) %>% autoplot()
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+toc()
+```
+
+The marginal effect of latitude is that the mean of predicted prices soars to almost $580,000 drastically when latitude is near 47.6 to 47.7 degree north, holding other variables constant at the average levels. This left-skewed line suggests that houses in the northern region of King County in Washington State are sold at much higher sale prices than those of the southern region and extreme northern region.  
+
+A possible explanation is that there are various infrastructures including large parks, commercial buildings, churches, and schools round the latitude from local maps. 
+
+The three predictors related to living size share a similar trend of positive correlation with prices. The effect gradually declines and the prices level off. 
+
+The marginal effect of living size is that the mean of predicted prices raises steadily at $8 per square foot as living size increases. When living size exceeds 7,500 square feet, increase in living size does not influence prediction of house prices. 
+
+The mean of predicted prices experiences the steepest increase at a rate of $9.75 per square feet when size of living space of 15 neighbors is between 2000 to 4000 square feet.  
+
+When the house possesses a small living size above the ground of within 2500 square feet, the mean of predicted prices is mostly affected, with the slope of a $3 increase in price per square feet increase in size. 
+
+# Basic GBM
+## Hyperparameters
+In document "p2 GBM", we have performed task
+(4) performed basic GBM algorithm on the training data.
+
+The best tuning hyperparameters are:
+  shrinkage = 0.05  (learning rate)
+  interaction.depth = 7  (7 splits on a tree)
+  n.minobsinnode = 5  (at least 5 observations in a leaf)
+
+We find them by alternative optimization with grid search: 
+Step 1: we run a basic GBM model
+Step 2: tune shrinkage in grid search first, choose the optimal shrinkage by RMSE
+Step 3: then tune the combination of interaction.depth and n.minobsinnode with shrinkage fixed at the new value, choose the optimal combination of interaction.depth and n.minobsinnode RMSE. 
+Step 4: Usually, we repeat the step 2 and 3 until no significant improvement. Here we omit Step 4 because of cost-effectiveness consideration. The best tuning hyperparameters are in the one with the least cross-validated RMSE on the training data, which is 0.07294 here.
+```{r}
+load(file = "house_gbm.rda")
+```
+
+```{r}
+house_gbm$shrinkage
+house_gbm$interaction.depth
+house_gbm$n.minobsinnode
+```
+
+After tuning, model RMSE decreases by
+```{r}
+paste(round((1 - 0.07293927/0.0742174) * 100, 4), "%", sep = "")
+```
+
+## Variable importance
+`sqft_living`, `lattitude`, `nn_sqft_living`, and `longitude` are the four most important predictors.
+```{r}
+vi_scores <- vi(house_gbm)
+head(vi_scores, 4)
+```
+
+```{r}
+vip(house_gbm, num_features = 4, scale = TRUE)
+```
+
+## PDP plots
+```{r}
+tic()
+p1 <- partial(house_gbm, pred.var = vi_scores[[1, 1]], n.trees = 100) %>%
+autoplot()
+p2 <- partial(house_gbm, pred.var = vi_scores[[2, 1]], n.trees = 100) %>%
+autoplot()
+p3 <- partial(house_gbm, pred.var = vi_scores[[3, 1]], n.trees = 100) %>%
+autoplot()
+p4 <- partial(house_gbm, pred.var = vi_scores[[4, 1]], n.trees = 100) %>%
+autoplot()
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+toc()
+```
+
+The marginal effect of latitude predicted by GBM is similar to that of RF. A possible explanation for the phenomena of high prices at a certain latitude is that there are various infrastructures including large parks, commercial buildings, churches, and schools around the latitude from local maps.
+
+The two predictors related to living size share a similar trend of positive correlation with prices. The effect gradually declines and the prices level off.
+
+The marginal effect of living size is that the mean of predicted prices raises steadily as living size increases. When living size exceeds 6,000 square feet, house prices remain \$600,000, which is $10,000 greater than the forecast in RF.
+
+The mean of predicted prices experiences the steepest increase at a rate of $9.75 per square feet when the size of the living space of the nearest 15 neighbors is between 2000 to 4000 square feet.
+
+When the house possesses a small living size above the ground of within 2500 square feet, the mean of predicted prices is mostly affected, with the slope of a $3 increase in price per square feet increase in size.
+
+The marginal effect of longitude is that the mean of predicted prices decreases by steps of \$1,200 or $2,500 as longitude increases. From local maps, the houses are gathered in blocks, thus the change in house prices is not smooth. It reveals that proximity to the coastline in the west and away from mountains in the east lead to high house prices.
+
+# Xgboost
+## Hyperparameters
+In document "p3 XGB", we have performed task
+(5) performed Xgboost algorithm on the training data.
+
+The best tuning hyperparameters are:
+  gamma = 0 (minimum loss reduction required to split)
+  lambda = 0.1 (Ridge L2 regularization on leaf weights)
+  alpha = 1 (Lasso L1 regularization on leaf weights)
+
+Like in RF, we find them by Cartesian full grid search: 
+we start with a RF model with default hyperparameters, create a hyperparameter tuning grid containing different values of gamma, lambda, and alpha, execute Cartesian full grid search in a for loop of one model for each combination of hyperparameters in the grid, measure their RMSE. The best tuning hyperparameters are in the one with the least cross-validated RMSE on the training data, which is 0.07198 here.
+```{r}
+xgb_prep <- recipe(price ~ ., data = house_train) %>%
+  step_integer(all_nominal()) %>%
+  prep(training = house_train, retain = TRUE) %>%
+  juice()
+
+X <- as.matrix(xgb_prep[setdiff(names(xgb_prep), "price")])
+Y <- xgb_prep$price
+```
+
+```{r}
+load(file = "house_xgb.rda")
+```
+
+```{r}
+house_xgb$params
+```
+
+After tuning, model RMSE decreases by
+```{r}
+paste(round((1 - 0.0719843/0.072148) * 100, 4), "%", sep = "")
+```
+
+```{r}
+load(file = "house_xgb_final.rda")
+```
+
+## Variable importance
+`sqft_living`, `lattitude`, `nn_sqft_living`, and `sqft_above` are the four most important predictors.
+```{r}
+vi_scores <- vi(house_xgb_final)
+head(vi_scores, 4)
+```
+
+```{r}
+vip(house_xgb_final, num_features = 4, scale = TRUE)
+```
+
+## PDP plots
+```{r}
+tic()
+p1 <- partial(house_xgb_final, pred.var = vi_scores[[1, 1]], 
+              train = X, type = "regression") %>% autoplot()
+p2 <- partial(house_xgb_final, pred.var = vi_scores[[2, 1]], 
+              train = X, type = "regression") %>% autoplot()
+p3 <- partial(house_xgb_final, pred.var = vi_scores[[3, 1]], 
+              train = X, type = "regression") %>% autoplot()
+p4 <- partial(house_xgb_final, pred.var = vi_scores[[4, 1]], 
+              train = X, type = "regression") %>% autoplot()
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+toc()
+```
+
+The marginal effect of living space and living space of 15 neighbors appear similar to those in RF. 
+
+The marginal effect of latitude seems the same as in RF except that the mean of predicted prices immediately decreases after the summit.
+
+The living space above grade exerts a considerable influence on prices when living space is approximately 1,200 and 5,000 square feet.
+
+# Comparison
+## Variance importance
+(6) The important variables in the three models are alike. Similarities include that they all regard `lattitude` and `sqft_living` as of the greatest importance. `nn_sqft_living` ranks the third, but much less important than `lattitude` or `sqft_living`. 
+
+The difference of the three models are that Basic GBM values `longitude` compared with `sqft_above` in RF and Xgboost, and that RF values `lattitude` as the top compared with `sqft_living` in Basic GBM and Xgboost.
+
+## Final model
+(7) Xgboost has the smallest cross-validated RMSE on the training data among RF (0.07912), GBM (0.07294), and Xgboost (0.07198). Hence, we use all training data to refit the Xgboost model `house_xgb_final` in document "p3 XGB" as our final model.
+```{r}
+house_xgb_final
+```
+
+## Prediction on test data
+```{r}
+house_test <- read.csv("house_test.csv", stringsAsFactors = TRUE)
+dim(house_test)  # dataset: house_test, response: price
+```
+
+```{r}
+Y_pred <- predict(house_xgb_final, newdata = data.matrix(house_test[!names(house_test) %in% c("price")]))
+summary(Y_pred)
+```
+
+RMSE is 0.01328, less than the cross-validated RMSE
+```{r}
+sqrt(mean(Y_pred - house_test$price))
+```
+
+
