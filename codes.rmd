@@ -44,11 +44,11 @@ knitr::opts_chunk$set(echo = TRUE, fig.align = 'center', fig.width = 9, fig.heig
 if(!require("pacman")){install.packages("pacman")}
 pacman::p_load(BradleyTerry2, dplyr, ggplot2, caret, gbm, xgboost, recipes, randomForest, ranger, vip, pdp, h2o, tictoc)
 
-setwd("D:/7027 ML/HW2_7027")
+setwd("D:/")
 ```
 
 ```{r}
-house <- read.csv("HW2_house_dataset.csv", stringsAsFactors = TRUE)
+house <- read.csv("data.csv", stringsAsFactors = TRUE)
 ```
 
 # Stratified sampling
