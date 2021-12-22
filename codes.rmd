@@ -204,7 +204,7 @@ knitr::opts_chunk$set(echo = TRUE, fig.align = 'center', fig.width = 9, fig.heig
 if(!require("pacman")){install.packages("pacman")}
 pacman::p_load(BradleyTerry2, dplyr, ggplot2, caret, gbm, xgboost, recipes, randomForest, ranger, vip, pdp, h2o, tictoc)
 
-setwd("D:/7027 ML/HW2_7027")
+setwd("D:/")
 ```
 
 ```{r}
@@ -408,7 +408,7 @@ knitr::opts_chunk$set(echo = TRUE, fig.align = 'center', fig.width = 9, fig.heig
 if(!require("pacman")){install.packages("pacman")}
 pacman::p_load(BradleyTerry2, dplyr, ggplot2, caret, gbm, xgboost, recipes, randomForest, ranger, vip, pdp, h2o, tictoc)
 
-setwd("D:/7027 ML/HW2_7027")
+setwd("D:/")
 ```
 
 ```{r}
@@ -619,10 +619,10 @@ knitr::opts_chunk$set(echo = TRUE, fig.align = 'center', fig.width = 9, fig.heig
 if(!require("pacman")){install.packages("pacman")}
 pacman::p_load(BradleyTerry2, dplyr, ggplot2, caret, gbm, xgboost, recipes, randomForest, ranger, vip, pdp, tictoc)
 
-#setwd("D:/7027 ML/HW2_7027")
+#setwd("D:/")
 ```
 
-As the last part of HW2, this document "p4 Comparison" will chiefly discuss results of the models. (All objects loaded into this document are outcomes from the previous three documents executed in sequence "p1 RF", "p2 GBM", and "p3 Xgboost". Because we did not specify `row.names=FALSE` when writing data into csv in the document "p1 RF", train and test data both have a duplicate row containing rownames. However, the issue does not affect our tree-based models.)
+As the last part of project, this document "p4 Comparison" will chiefly discuss results of the models. (All objects loaded into this document are outcomes from the previous three documents executed in sequence "p1 RF", "p2 GBM", and "p3 Xgboost". Because we did not specify `row.names=FALSE` when writing data into csv in the document "p1 RF", train and test data both have a duplicate row containing rownames. However, the issue does not affect our tree-based models.)
 
 ```{r}
 # KingCountyHouses package
